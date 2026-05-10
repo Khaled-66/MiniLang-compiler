@@ -3,7 +3,7 @@
 A complete programming language compiler and interpreter built from scratch using **ANTLR4** and **Java**.
 This project implements the full compilation pipeline — from raw source code to executed output — including
 lexical analysis, parsing, AST construction, semantic analysis, optimization, interpretation, and a web-based IDE.
-S
+
 ---
 
 ## System Architecture
