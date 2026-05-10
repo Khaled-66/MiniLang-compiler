@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>MiniLang IDE</title>
+<style>
+/* ── Reset & Tokens ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;--accent:#58a6ff;
+  --accent2:#3fb950;--error:#f85149;--warn:#e3b341;--text:#e6edf3;
+  --text-dim:#8b949e;--token-kw:#ff7b72;--token-str:#a5d6ff;
+  --token-num:#79c0ff;--token-id:#e6edf3;--token-op:#ffa657;
+  --token-comment:#6e7681;--radius:8px;--mono:'JetBrains Mono',monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overflow:hidden}
+
+/* ── Layout ── */
+#app{display:grid;grid-template-rows:48px 1fr;height:100vh}
+#toolbar{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;padding:0 16px;
+}
+#main{display:grid;grid-template-columns:1fr 360px;height:calc(100vh - 48px);overflow:hidden}
+#editor-panel{display:flex;flex-direction:column;border-right:1px solid var(--border)}
+#right-panel{display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Toolbar ── */
+.logo{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:.5px;margin-right:8px}
+.btn{
+  padding:6px 14px;border-radius:6px;border:none;font-size:13px;
+  font-weight:600;cursor:pointer;transition:all .15s ease;
+}
+.btn-run{background:var(--accent2);color:#0d1117}
+.btn-run:hover{filter:brightness(1.15)}
+.btn-run.running{opacity:.6;cursor:not-allowed}
+.btn-clear{background:transparent;color:var(--text-dim);border:1px solid var(--border)}
+.btn-clear:hover{color:var(--text);border-color:var(--text-dim)}
+.btn-sample{background:transparent;color:var(--accent);border:1px solid var(--accent);font-size:12px}
+.btn-sample:hover{background:var(--accent);color:#0d1117}
+.toolbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+#status{font-size:12px;color:var(--text-dim)}
+
+/* ── Code Editor ── */
+#editor-wrap{
+  flex:1;position:relative;display:flex;overflow:hidden;
+  background:var(--bg);
+}
+#line-numbers{
+  padding:12px 0;background:var(--surface);color:var(--text-dim);
+  font-family:var(--mono);font-size:14px;line-height:1.6;
+  text-align:right;user-select:none;min-width:44px;
+  border-right:1px solid var(--border);
+  overflow:hidden;
+}
+.line-num{padding:0 10px 0 6px;display:block}
+#editor{
+  flex:1;padding:12px 16px;
+  font-family:var(--mono);font-size:14px;line-height:1.6;
+  color:var(--text);background:transparent;border:none;outline:none;
+  resize:none;tab-size:4;caret-color:var(--accent);
+  position:absolute;top:0;left:44px;right:0;bottom:0;
+  z-index:2;white-space:pre;overflow:auto;
+  -webkit-text-fill-color:transparent; /* makes highlight layer show */
+}
+#highlight{
+  position:absolute;top:0;left:44px;right:0;bottom:0;
+  padding:12px 16px;
+  font-family:var(--mono);font-size:14px;line-height:1.6;
+  pointer-events:none;overflow:auto;white-space:pre;
+  z-index:1;
+}
+/* sync scrolling indicator */
+#editor::-webkit-scrollbar{width:6px;height:6px}
+#editor::-webkit-scrollbar-track{background:transparent}
+#editor::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Tabs ── */
+.tab-bar{
+  display:flex;background:var(--surface);border-bottom:1px solid var(--border);
+  padding:0 8px;flex-shrink:0;
+}
+.tab{
+  padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;
+  color:var(--text-dim);border-bottom:2px solid transparent;
+  transition:all .15s;user-select:none;
+}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+.tab-badge{
+  display:inline-block;margin-left:6px;padding:1px 6px;
+  background:var(--error);color:#fff;border-radius:10px;
+  font-size:10px;font-weight:700;vertical-align:middle;
+}
+
+/* ── Output / Errors / AST panels ── */
+.panel{display:none;flex:1;flex-direction:column;overflow:hidden}
+.panel.active{display:flex}
+
+#output-box{
+  flex:1;padding:12px 16px;font-family:var(--mono);font-size:13px;
+  line-height:1.7;white-space:pre-wrap;overflow-y:auto;color:var(--text);
+}
+.out-line{display:block}
+.out-line.error-line{color:var(--error)}
+
+#errors-box{
+  flex:1;padding:8px;overflow-y:auto;
+}
+.err-item{
+  padding:10px 12px;border-radius:var(--radius);margin-bottom:6px;
+  border-left:3px solid var(--error);background:#1a0a0a;
+  font-size:12px;line-height:1.6;
+}
+.err-phase{font-weight:700;color:var(--error);text-transform:uppercase;font-size:10px;letter-spacing:.5px}
+.err-msg{color:var(--text);margin-top:2px}
+.err-loc{color:var(--text-dim);font-family:var(--mono);font-size:11px;margin-top:4px}
+.no-errors{padding:24px;text-align:center;color:var(--accent2);font-size:13px}
+
+/* ── AST Visualizer ── */
+#ast-box{flex:1;overflow:auto;padding:8px}
+.ast-tree{font-family:var(--mono);font-size:12px;line-height:1.8;user-select:none}
+.ast-node{cursor:pointer;display:flex;align-items:center;gap:4px;padding:1px 0}
+.ast-node:hover>.ast-label{background:rgba(88,166,255,.1)}
+.ast-toggle{color:var(--text-dim);font-size:10px;width:12px;display:inline-block;flex-shrink:0}
+.ast-label{
+  padding:1px 7px;border-radius:4px;font-size:11px;
+  display:inline-block;transition:background .1s;
+}
+/* Node type colors */
+.n-prog{color:#c678dd}
+.n-stmt{color:#e06c75}
+.n-expr{color:var(--token-num)}
+.n-lit{color:var(--accent2)}
+.n-var{color:var(--token-str)}
+.n-fn{color:var(--warn)}
+.ast-children{padding-left:18px;border-left:1px solid var(--border);margin-left:6px}
+.ast-children.collapsed{display:none}
+.ast-attr{color:var(--text-dim);font-size:10px;margin-left:4px}
+
+/* ── Bottom status bar ── */
+#statusbar{
+  background:var(--surface);border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;padding:0 16px;
+  height:24px;font-size:11px;color:var(--text-dim);flex-shrink:0;
+}
+#statusbar span{display:flex;align-items:center;gap:4px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot-ok{background:var(--accent2)}
+.dot-err{background:var(--error)}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Toolbar ── -->
+  <div id="toolbar">
+    <span class="logo">⚡ MiniLang IDE</span>
+    <button class="btn btn-run" id="btn-run" onclick="runCode()">▶ Run</button>
+    <button class="btn btn-clear" onclick="clearAll()">✕ Clear</button>
+    <button class="btn btn-sample" onclick="loadSample('hello')">Hello World</button>
+    <button class="btn btn-sample" onclick="loadSample('fib')">Fibonacci</button>
+    <button class="btn btn-sample" onclick="loadSample('array')">Arrays</button>
+    <button class="btn btn-sample" onclick="loadSample('switch')">Switch</button>
+    <div class="toolbar-right">
+      <span id="status">Ready</span>
+    </div>
+  </div>
+
+  <!-- ── Main ── -->
+  <div id="main">
+
+    <!-- Left: Code Editor -->
+    <div id="editor-panel">
+      <div id="editor-wrap">
+        <div id="line-numbers"><span class="line-num">1</span></div>
+        <div id="highlight" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false"
+          placeholder="// Write MiniLang code here..."
+          oninput="onEdit()" onscroll="syncScroll()" onkeydown="handleTab(event)"></textarea>
+      </div>
+      <div id="statusbar">
+        <span><span class="dot dot-ok" id="dot"></span><span id="sb-state">No errors</span></span>
+        <span>Ln <span id="sb-ln">1</span>, Col <span id="sb-col">1</span></span>
+        <span>MiniLang</span>
+      </div>
+    </div>
+
+    <!-- Right: Output / Errors / AST -->
+    <div id="right-panel">
+      <div class="tab-bar">
+        <div class="tab active" id="tab-output" onclick="switchTab('output')">Output</div>
+        <div class="tab" id="tab-errors" onclick="switchTab('errors')">
+          Errors<span class="tab-badge" id="err-badge" style="display:none">0</span>
+        </div>
+        <div class="tab" id="tab-ast" onclick="switchTab('ast')">AST</div>
+      </div>
+
+      <!-- Output -->
+      <div class="panel active" id="panel-output">
+        <div id="output-box"><span style="color:var(--text-dim);font-size:13px">Run your code to see output here.</span></div>
+      </div>
+
+      <!-- Errors -->
+      <div class="panel" id="panel-errors">
+        <div id="errors-box"><div class="no-errors">✓ No errors detected</div></div>
+      </div>
+
+      <!-- AST Visualizer -->
+      <div class="panel" id="panel-ast">
+        <div id="ast-box"><span style="color:var(--text-dim);font-size:13px;padding:16px;display:block">Run code to see the AST.</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// MiniLang IDE — Frontend Logic
+// ═══════════════════════════════════════════════════════════════
+
+const SERVER = 'http://localhost:8080';
+
+// ── Sample programs ─────────────────────────────────────────────
+const SAMPLES = {
+  hello: `// Hello World in MiniLang
+name = "World";
+print "Hello, " + name + "!";
+print "MiniLang is running.";`,
+
+  fib: `// Fibonacci with recursion
+function fib(n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+i = 0;
+while (i < 8) {
+    print fib(i);
+    i = i + 1;
+}`,
+
+  array: `// Arrays and for loops
+nums = [10, 20, 30, 40, 50];
+sum = 0;
+
+for (i = 0; i < 5; i = i + 1) {
+    sum = sum + nums[i];
+}
+
+print "Sum: " + sum;
+print "Length: " + length(nums);
+
+push(nums, 60);
+print "After push: " + nums[5];`,
+
+  switch: `// Switch-case demo
+day = 3;
+switch (day) {
+    case 1: print "Monday"; break;
+    case 2: print "Tuesday"; break;
+    case 3: print "Wednesday"; break;
+    case 4: print "Thursday"; break;
+    default: print "Weekend";
+}`
+};
+
+// ── Tab switching ───────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ── Load a sample program ───────────────────────────────────────
+function loadSample(name) {
+  document.getElementById('editor').value = SAMPLES[name] || '';
+  onEdit();
+}
+
+// ── Clear all panels ────────────────────────────────────────────
+function clearAll() {
+  document.getElementById('editor').value = '';
+  document.getElementById('output-box').innerHTML =
+    '<span style="color:var(--text-dim);font-size:13px">Run your code to see output here.</span>';
+  document.getElementById('errors-box').innerHTML =
+    '<div class="no-errors">✓ No errors detected</div>';
+  document.getElementById('ast-box').innerHTML =
+    '<span style="color:var(--text-dim);font-size:13px;padding:16px;display:block">Run code to see the AST.</span>';
+  setStatus('ok', 'No errors');
+  updateBadge(0);
+  onEdit();
+}
+
+// ── Run code ────────────────────────────────────────────────────
+async function runCode() {
+  const btn = document.getElementById('btn-run');
+  const code = document.getElementById('editor').value.trim();
+  if (!code) return;
+
+  btn.classList.add('running');
+  btn.textContent = '⏳ Running...';
+  setStatus('ok', 'Running...');
+
+  try {
+    const res = await fetch(SERVER + '/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: code
+    });
+    const data = await res.json();
+    renderOutput(data.output);
+    renderErrors(data.errors);
+    renderAST(data.ast);
+    const hasErrors = data.errors && data.errors.trim().length > 0;
+    setStatus(hasErrors ? 'err' : 'ok', hasErrors ? 'Errors found' : 'Run successful');
+    if (hasErrors) switchTab('errors'); else switchTab('output');
+  } catch (e) {
+    renderOutput('');
+    renderErrors('[Connection] Cannot reach the compiler server.\nMake sure java Main is running on port 8080.');
+    setStatus('err', 'Server offline');
+    switchTab('errors');
+  } finally {
+    btn.classList.remove('running');
+    btn.textContent = '▶ Run';
+  }
+}
+
+// ── Render output lines ─────────────────────────────────────────
+function renderOutput(text) {
+  const box = document.getElementById('output-box');
+  if (!text || !text.trim()) {
+    box.innerHTML = '<span style="color:var(--text-dim)">Program produced no output.</span>';
+    return;
+  }
+  box.innerHTML = text.split('\n').map(line => {
+    const cls = line.startsWith('[Runtime') || line.startsWith('[Semantic') ? ' error-line' : '';
+    return `<span class="out-line${cls}">${escHtml(line)}</span>`;
+  }).join('\n');
+}
+
+// ── Render error list ───────────────────────────────────────────
+function renderErrors(errText) {
+  const box = document.getElementById('errors-box');
+  if (!errText || !errText.trim()) {
+    box.innerHTML = '<div class="no-errors">✓ No errors detected</div>';
+    updateBadge(0);
+    return;
+  }
+  const lines = errText.split('\n').filter(l => l.trim());
+  updateBadge(lines.length);
+  box.innerHTML = lines.map(line => {
+    // Parse:  [Phase] line L:C — message
+    const m = line.match(/^\[(\w+)\]\s*(?:line\s*(\d+):(\d+)\s*[—-]\s*)?(.+)$/);
+    if (m) {
+      return `<div class="err-item">
+        <div class="err-phase">${escHtml(m[1])}</div>
+        <div class="err-msg">${escHtml(m[4])}</div>
+        ${m[2] ? `<div class="err-loc">line ${m[2]}, column ${m[3]}</div>` : ''}
+      </div>`;
+    }
+    return `<div class="err-item"><div class="err-msg">${escHtml(line)}</div></div>`;
+  }).join('');
+}
+
+// ── Render AST tree ─────────────────────────────────────────────
+function renderAST(ast) {
+  const box = document.getElementById('ast-box');
+  if (!ast || ast === 'null') {
+    box.innerHTML = '<span style="color:var(--text-dim);font-size:13px;padding:16px;display:block">No AST (parse error).</span>';
+    return;
+  }
+  box.innerHTML = '<div class="ast-tree">' + buildASTHtml(ast, true) + '</div>';
+}
+
+// Recursively build HTML for an AST node object
+function buildASTHtml(node, expanded) {
+  if (!node) return '';
+  const type = node.type || '?';
+  const children = node.children || [];
+  const hasChildren = children.length > 0;
+
+  // Choose color class by node type
+  const colorClass = nodeColor(type);
+
+  // Build label text (type + key attributes)
+  let label = type.replace('Node', '');
+  if (node.operator)  label += ` <span class="ast-attr">${escHtml(node.operator)}</span>`;
+  if (node.varName)   label += ` <span class="ast-attr">${escHtml(node.varName)}</span>`;
+  if (node.name)      label += ` <span class="ast-attr">${escHtml(node.name)}</span>`;
+  if (node.value !== undefined) label += ` <span class="ast-attr" style="color:var(--accent2)">${escHtml(String(node.value))}</span>`;
+  if (node.line > 0)  label += ` <span class="ast-attr" style="color:var(--token-comment)">L${node.line}</span>`;
+
+  const nodeId = 'n' + Math.random().toString(36).slice(2);
+
+  let html = `<div class="ast-node" onclick="toggleNode('${nodeId}',event)">`;
+  html += `<span class="ast-toggle">${hasChildren ? (expanded ? '▾' : '▸') : ' '}</span>`;
+  html += `<span class="ast-label ${colorClass}">${label}</span>`;
+  html += '</div>';
+
+  if (hasChildren) {
+    html += `<div class="ast-children" id="${nodeId}" ${expanded ? '' : 'class="ast-children collapsed"'}>`;
+    for (const child of children) {
+      html += buildASTHtml(child, false);
+    }
+    html += '</div>';
+  }
+  return html;
+}
+
+function toggleNode(id, e) {
+  e.stopPropagation();
+  const el = document.getElementById(id);
+  if (!el) return;
+  const collapsed = el.classList.toggle('collapsed');
+  const toggle = el.previousElementSibling.querySelector('.ast-toggle');
+  if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
+}
+
+function nodeColor(type) {
+  if (type === 'ProgramNode')  return 'n-prog';
+  if (type === 'LiteralNode')  return 'n-lit';
+  if (type === 'VariableNode') return 'n-var';
+  if (type.includes('Function') || type === 'ReturnNode') return 'n-fn';
+  if (type.includes('BinaryOp') || type.includes('Unary')) return 'n-expr';
+  return 'n-stmt';
+}
+
+// ── Syntax highlighting ─────────────────────────────────────────
+const KW = /\b(print|if|else|while|for|switch|case|default|break|function|return|input|true|false)\b/g;
+const STR = /"(?:[^"\\]|\\.)*"/g;
+const NUM = /\b\d+(\.\d+)?\b/g;
+const CMT_LINE = /\/\/.*/g;
+const CMT_BLOCK = /\/\*[\s\S]*?\*\//g;
+const OP = /[+\-*\/=<>!&|]+/g;
+
+function highlight(code) {
+  // Escape first so HTML chars are safe
+  let s = escHtml(code);
+  // Apply in order: comments first (they override everything inside)
+  s = s.replace(escHtml('/*').replace(/\//g,'\\/'), '/*'); // undo — we work on raw
+  // Re-do on raw code then escape selectively:
+  return highlightRaw(code);
+}
+
+function highlightRaw(code) {
+  // We'll build an array of {start, end, cls} spans then merge
+  const spans = [];
+  const addSpans = (re, cls) => {
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(code)) !== null) {
+      spans.push({ s: m.index, e: m.index + m[0].length, cls });
+    }
+  };
+
+  // Order matters: comments first (highest priority)
+  addSpans(new RegExp(CMT_BLOCK.source, 'g'), 'token-comment');
+  addSpans(new RegExp(CMT_LINE.source,  'g'), 'token-comment');
+  addSpans(new RegExp(STR.source,       'g'), 'token-str');
+  addSpans(new RegExp(KW.source,        'g'), 'token-kw');
+  addSpans(new RegExp(NUM.source,       'g'), 'token-num');
+
+  // Sort by start position, drop overlaps
+  spans.sort((a, b) => a.s - b.s);
+  const merged = [];
+  let cursor = 0;
+  for (const sp of spans) {
+    if (sp.s < cursor) continue; // overlaps an earlier span — skip
+    merged.push(sp);
+    cursor = sp.e;
+  }
+
+  // Build output
+  let out = '';
+  let pos = 0;
+  for (const sp of merged) {
+    out += escHtml(code.slice(pos, sp.s));
+    out += `<span style="color:var(--${sp.cls})">${escHtml(code.slice(sp.s, sp.e))}</span>`;
+    pos = sp.e;
+  }
+  out += escHtml(code.slice(pos));
+  return out;
+}
+
+// Token CSS var names
+const TOKEN_VARS = {
+  'token-kw':      'var(--token-kw)',
+  'token-str':     'var(--token-str)',
+  'token-num':     'var(--token-num)',
+  'token-comment': 'var(--token-comment)',
+};
+
+// ── Editor event handlers ───────────────────────────────────────
+function onEdit() {
+  const editor = document.getElementById('editor');
+  const code = editor.value;
+  updateHighlight(code);
+  updateLineNumbers(code);
+  updateCursor(editor);
+}
+
+function updateHighlight(code) {
+  document.getElementById('highlight').innerHTML = highlightRaw(code);
+}
+
+function updateLineNumbers(code) {
+  const lines = code.split('\n');
+  document.getElementById('line-numbers').innerHTML =
+    lines.map((_, i) => `<span class="line-num">${i + 1}</span>`).join('');
+}
+
+function syncScroll() {
+  const ed = document.getElementById('editor');
+  document.getElementById('highlight').scrollTop  = ed.scrollTop;
+  document.getElementById('highlight').scrollLeft = ed.scrollLeft;
+  document.getElementById('line-numbers').scrollTop = ed.scrollTop;
+}
+
+function handleTab(e) {
+  if (e.key !== 'Tab') return;
+  e.preventDefault();
+  const el = e.target;
+  const start = el.selectionStart;
+  el.value = el.value.slice(0, start) + '    ' + el.value.slice(el.selectionEnd);
+  el.selectionStart = el.selectionEnd = start + 4;
+  onEdit();
+}
+
+function updateCursor(el) {
+  const text = el.value.slice(0, el.selectionStart);
+  const lines = text.split('\n');
+  document.getElementById('sb-ln').textContent  = lines.length;
+  document.getElementById('sb-col').textContent = lines[lines.length - 1].length + 1;
+}
+
+// Keyboard shortcut: Ctrl+Enter to run
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runCode();
+});
+document.getElementById('editor').addEventListener('keyup', e => updateCursor(e.target));
+document.getElementById('editor').addEventListener('click', e => updateCursor(e.target));
+
+// ── Helpers ─────────────────────────────────────────────────────
+function setStatus(state, msg) {
+  document.getElementById('dot').className = 'dot dot-' + state;
+  document.getElementById('sb-state').textContent = msg;
+  document.getElementById('status').textContent = msg;
+}
+
+function updateBadge(count) {
+  const b = document.getElementById('err-badge');
+  b.style.display = count > 0 ? 'inline-block' : 'none';
+  b.textContent = count;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ── Boot with Hello World sample ────────────────────────────────
+window.addEventListener('load', () => loadSample('hello'));
+</script>
+</body>
+</html>
